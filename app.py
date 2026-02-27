@@ -1,186 +1,438 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+import os
 
-# ==========================================
-# PAGE CONFIG
-# ==========================================
+# ─────────────────────────────────────────────
+#  PAGE CONFIG
+# ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Executive Financial Dashboard",
-    layout="wide"
+    page_title="Olist Revenue Intelligence",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-st.title("📊 Executive Financial Intelligence Dashboard")
-st.markdown("Strategic revenue, customer and forecasting insights")
+# ─────────────────────────────────────────────
+#  CUSTOM CSS  — clean professional look
+# ─────────────────────────────────────────────
+st.markdown("""
+<style>
+    /* Main background */
+    .main { background-color: #f8f9fa; }
 
-# ==========================================
-# LOAD DATA
-# ==========================================
+    /* KPI card style */
+    .kpi-card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px 16px;
+        text-align: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        border-left: 4px solid #2196F3;
+    }
+    .kpi-label {
+        font-size: 13px;
+        color: #666;
+        font-weight: 500;
+        margin-bottom: 6px;
+    }
+    .kpi-value {
+        font-size: 22px;
+        font-weight: 700;
+        color: #1a1a2e;
+    }
+    .kpi-sub {
+        font-size: 11px;
+        color: #999;
+        margin-top: 4px;
+    }
+
+    /* Section headers */
+    .section-header {
+        font-size: 18px;
+        font-weight: 700;
+        color: #1a1a2e;
+        margin: 8px 0 16px 0;
+        padding-bottom: 8px;
+        border-bottom: 2px solid #e0e0e0;
+    }
+
+    /* Sidebar */
+    .css-1d391kg { background-color: #1a1a2e; }
+
+    /* Hide default streamlit header */
+    header[data-testid="stHeader"] { background: transparent; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+#  DATA LOADING
+# ─────────────────────────────────────────────
 @st.cache_data
-def load_data():
-    monthly = pd.read_csv("monthly_revenue.csv")
-    customers = pd.read_csv("customer_summary.csv")
-    churn = pd.read_csv("churn_summary.csv")
-    return monthly, customers, churn
+def load_all_data():
+    monthly     = pd.read_csv("monthly_revenue.csv",  parse_dates=["date"])
+    customer    = pd.read_csv("customer_revenue.csv")
+    repeat      = pd.read_csv("customer_repeat.csv")
+    category    = pd.read_csv("category_revenue.csv")
+    kpi         = pd.read_csv("kpi_summary.csv")
+    return monthly, customer, repeat, category, kpi
 
-monthly_revenue, customer_summary, churn_summary = load_data()
+try:
+    monthly_revenue, customer_revenue, repeat_df, category_rev, kpi_df = load_all_data()
+    data_loaded = True
+except FileNotFoundError as e:
+    data_loaded = False
+    missing_file = str(e)
 
-monthly_revenue['month'] = pd.to_datetime(monthly_revenue['month'])
+# ─────────────────────────────────────────────
+#  SIDEBAR
+# ─────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 📊 Olist Dashboard")
+    st.markdown("**Brazilian E-Commerce**")
+    st.markdown("---")
 
-# ==========================================
-# SIDEBAR FILTERS
-# ==========================================
-st.sidebar.header("🔎 Filters")
+    if data_loaded:
+        st.markdown("### 🗂️ Navigation")
+        page = st.radio(
+            "",
+            ["🏠 Overview", "📈 Revenue Trends", "🔮 Forecast",
+             "👥 Customers", "💰 Categories"],
+            label_visibility="collapsed"
+        )
 
-min_date = monthly_revenue['month'].min()
-max_date = monthly_revenue['month'].max()
+        st.markdown("---")
+        st.markdown("### 📅 Date Range")
+        min_date = monthly_revenue['date'].min()
+        max_date = monthly_revenue['date'].max()
+        st.info(f"**From:** {min_date.strftime('%b %Y')}\n\n**To:** {max_date.strftime('%b %Y')}")
 
-date_range = st.sidebar.date_input(
-    "Select Date Range",
-    [min_date, max_date]
-)
+        st.markdown("---")
+        st.markdown("### ℹ️ About")
+        st.markdown("""
+        - **Dataset:** Olist (Kaggle)
+        - **Rows:** 100K+ orders
+        - **Period:** 2016–2018
+        - **Built with:** Python + Streamlit
+        """)
+    else:
+        page = "🏠 Overview"
 
-filtered_monthly = monthly_revenue[
-    (monthly_revenue['month'] >= pd.to_datetime(date_range[0])) &
-    (monthly_revenue['month'] <= pd.to_datetime(date_range[1]))
-]
+# ─────────────────────────────────────────────
+#  ERROR STATE — files not found
+# ─────────────────────────────────────────────
+if not data_loaded:
+    st.error("⚠️ CSV files not found. Please make sure these files are in the same folder as app.py:")
+    st.code("""
+monthly_revenue.csv
+customer_revenue.csv
+customer_repeat.csv
+category_revenue.csv
+kpi_summary.csv
+    """)
+    st.info("Run the Google Colab notebook first to generate these files, then upload them to the same folder as app.py.")
+    st.stop()
 
-# ==========================================
-# KPIs
-# ==========================================
-total_revenue = customer_summary['revenue'].sum()
-total_customers = len(customer_summary)
-total_orders = customer_summary['total_orders'].sum()
-avg_order_value = total_revenue / total_orders
+# ─────────────────────────────────────────────
+#  HELPER: extract KPI values
+# ─────────────────────────────────────────────
+def get_kpi(metric_name):
+    row = kpi_df[kpi_df['Metric'] == metric_name]
+    return float(row['Value'].values[0]) if len(row) else 0.0
 
-monthly_series = filtered_monthly.set_index('month')['revenue']
+total_revenue   = get_kpi('Total Revenue')
+total_orders    = get_kpi('Total Orders')
+total_customers = get_kpi('Unique Customers')
+avg_order_value = get_kpi('Avg Order Value')
+repeat_pct      = get_kpi('Repeat Customer Rate %')
+mom_growth      = get_kpi('MoM Growth %')
 
-if len(monthly_series) > 1:
-    growth_rate = monthly_series.pct_change().mean() * 100
-else:
-    growth_rate = 0
+# ─────────────────────────────────────────────
+#  PAGE: OVERVIEW
+# ─────────────────────────────────────────────
+if page == "🏠 Overview":
+    st.markdown("# 📊 Financial & Revenue Intelligence Dashboard")
+    st.markdown("**Dataset:** Brazilian E-Commerce | Olist | Kaggle &nbsp;|&nbsp; **Built for:** Data Analytics Portfolio")
+    st.markdown("---")
 
-col1, col2, col3, col4, col5 = st.columns(5)
+    # ── KPI CARDS ────────────────────────────────
+    st.markdown('<p class="section-header">🎯 Executive KPIs</p>', unsafe_allow_html=True)
 
-col1.metric("Total Revenue", f"${total_revenue:,.0f}")
-col2.metric("Customers", f"{total_customers:,}")
-col3.metric("Orders", f"{total_orders:,}")
-col4.metric("Avg Order Value", f"${avg_order_value:,.2f}")
-col5.metric("Avg Monthly Growth", f"{growth_rate:.2f}%")
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
 
-st.divider()
+    kpi_data = [
+        (c1, "💰 Total Revenue",    f"BRL {total_revenue:,.0f}",    "All delivered orders"),
+        (c2, "📦 Total Orders",     f"{int(total_orders):,}",       "Delivered orders only"),
+        (c3, "👥 Customers",        f"{int(total_customers):,}",    "Unique buyers"),
+        (c4, "🛒 Avg Order Value",  f"BRL {avg_order_value:,.2f}", "Per order"),
+        (c5, "🔁 Repeat Rate",      f"{repeat_pct:.1f}%",          "Bought 2+ times"),
+        (c6, "📈 MoM Growth",
+             f"{'▲' if mom_growth >= 0 else '▼'} {abs(mom_growth):.1f}%",
+             "Last month vs prior"),
+    ]
 
-# ==========================================
-# REVENUE TREND (Plotly - Professional)
-# ==========================================
-st.subheader("📈 Revenue Trend")
+    for col, label, value, sub in kpi_data:
+        with col:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-label">{label}</div>
+                <div class="kpi-value">{value}</div>
+                <div class="kpi-sub">{sub}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-fig = px.line(
-    filtered_monthly,
-    x="month",
-    y="revenue",
-    markers=True,
-    color_discrete_sequence=["#1f3b4d"]
-)
+    st.markdown("<br>", unsafe_allow_html=True)
 
-fig.update_layout(
-    template="plotly_white",
-    xaxis_title="Month",
-    yaxis_title="Revenue",
-    height=400
-)
+    # ── REVENUE TREND (mini) ──────────────────────
+    col_left, col_right = st.columns([2, 1])
 
-st.plotly_chart(fig, use_container_width=True)
+    with col_left:
+        st.markdown('<p class="section-header">📈 Revenue Trend</p>', unsafe_allow_html=True)
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.fill_between(monthly_revenue['date'], monthly_revenue['revenue'],
+                        alpha=0.15, color='#2196F3')
+        ax.plot(monthly_revenue['date'], monthly_revenue['revenue'],
+                color='#2196F3', linewidth=2.5, marker='o', markersize=4)
+        ax.set_ylabel("Revenue (BRL)", fontsize=10)
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x/1e6:.1f}M'))
+        ax.grid(axis='y', alpha=0.3)
+        ax.spines[['top','right','left']].set_visible(False)
+        plt.xticks(rotation=45, fontsize=9)
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
 
-st.divider()
+    with col_right:
+        st.markdown('<p class="section-header">🔁 Customer Types</p>', unsafe_allow_html=True)
+        fig2, ax2 = plt.subplots(figsize=(4, 4))
+        ax2.pie(
+            repeat_df['Count'],
+            labels=repeat_df['Type'],
+            autopct='%1.1f%%',
+            colors=['#2196F3', '#FF9800'],
+            startangle=90,
+            wedgeprops={'edgecolor': 'white', 'linewidth': 2}
+        )
+        plt.tight_layout()
+        st.pyplot(fig2)
+        plt.close()
 
-# ==========================================
-# REVENUE DISTRIBUTION
-# ==========================================
-st.subheader("💰 Customer Revenue Distribution")
+    # ── TOP CATEGORIES (mini) ─────────────────────
+    st.markdown('<p class="section-header">💰 Top 5 Categories by Revenue</p>', unsafe_allow_html=True)
+    top5 = category_rev.head(5)
+    fig3, ax3 = plt.subplots(figsize=(12, 2.5))
+    colors = ['#2196F3', '#42A5F5', '#64B5F6', '#90CAF9', '#BBDEFB']
+    bars = ax3.barh(top5['category'][::-1], top5['revenue'][::-1], color=colors[::-1])
+    ax3.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'BRL {x/1e6:.1f}M'))
+    ax3.spines[['top','right','left']].set_visible(False)
+    ax3.grid(axis='x', alpha=0.3)
+    plt.tight_layout()
+    st.pyplot(fig3)
+    plt.close()
 
-fig2 = px.histogram(
-    customer_summary,
-    x="revenue",
-    nbins=40,
-    color_discrete_sequence=["#5c4d7d"]
-)
+# ─────────────────────────────────────────────
+#  PAGE: REVENUE TRENDS
+# ─────────────────────────────────────────────
+elif page == "📈 Revenue Trends":
+    st.markdown("# 📈 Revenue Trend Analysis")
+    st.markdown("---")
 
-fig2.update_layout(template="plotly_white", height=400)
+    # Full revenue trend
+    fig, ax = plt.subplots(figsize=(14, 5))
+    ax.fill_between(monthly_revenue['date'], monthly_revenue['revenue'], alpha=0.1, color='#2196F3')
+    ax.plot(monthly_revenue['date'], monthly_revenue['revenue'],
+            color='#2196F3', linewidth=2.5, marker='o', markersize=5, label='Monthly Revenue')
 
-st.plotly_chart(fig2, use_container_width=True)
+    # Annotate peak
+    peak_idx  = monthly_revenue['revenue'].idxmax()
+    peak_date = monthly_revenue.loc[peak_idx, 'date']
+    peak_val  = monthly_revenue.loc[peak_idx, 'revenue']
+    ax.annotate(f"Peak\nBRL {peak_val:,.0f}",
+                xy=(peak_date, peak_val),
+                xytext=(peak_date, peak_val * 0.82),
+                arrowprops=dict(arrowstyle='->', color='red', lw=1.5),
+                fontsize=9, color='red', ha='center')
 
-st.divider()
+    ax.set_title("Monthly Revenue — Olist E-Commerce (2016–2018)", fontsize=14, fontweight='bold')
+    ax.set_ylabel("Revenue (BRL)")
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x/1e6:.1f}M'))
+    ax.grid(alpha=0.3)
+    ax.spines[['top','right']].set_visible(False)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close()
 
-# ==========================================
-# TOP 10% CONTRIBUTION
-# ==========================================
-st.subheader("💎 Revenue Concentration")
+    # Stats table
+    st.markdown("### 📋 Monthly Revenue Table")
+    display_df = monthly_revenue.copy()
+    display_df['date'] = display_df['date'].dt.strftime('%Y-%m')
+    display_df['revenue'] = display_df['revenue'].map('BRL {:,.2f}'.format)
+    display_df.columns = ['Month', 'Revenue']
+    st.dataframe(display_df, use_container_width=True, height=400)
 
-customer_sorted = customer_summary.sort_values(by="revenue", ascending=False)
-top_10 = int(0.1 * len(customer_sorted))
-top_revenue = customer_sorted.head(top_10)['revenue'].sum()
-percentage = (top_revenue / total_revenue) * 100
+# ─────────────────────────────────────────────
+#  PAGE: FORECAST
+# ─────────────────────────────────────────────
+elif page == "🔮 Forecast":
+    st.markdown("# 🔮 Revenue Forecasting")
+    st.markdown("Using **Moving Average** method — smooths short-term noise to reveal trend direction.")
+    st.markdown("---")
 
-st.metric("Top 10% Revenue Contribution", f"{percentage:.2f}%")
+    monthly_series = monthly_revenue.set_index('date')['revenue']
 
-st.divider()
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        window = st.selectbox("Moving Average Window", [3, 6, 9], index=0)
+        st.markdown("---")
+        last_avg = monthly_series.tail(window).mean()
+        st.metric("Forecast (Next Month)", f"BRL {last_avg:,.0f}")
+        st.metric("Forecast (Avg 3 Months)", f"BRL {last_avg:,.0f}")
 
-# ==========================================
-# CHURN ANALYSIS
-# ==========================================
-st.subheader("🔄 Customer Retention")
+    # Build MAs and forecast
+    ma = monthly_series.rolling(window=window).mean()
+    last_date    = monthly_series.index[-1]
+    future_dates = pd.date_range(last_date + pd.DateOffset(months=1), periods=3, freq='MS')
+    forecast_s   = pd.Series([last_avg] * 3, index=future_dates)
 
-fig3 = px.pie(
-    churn_summary,
-    names="customer_type",
-    values="count",
-    color_discrete_sequence=["#2f4b7c", "#d45087"]
-)
+    with col1:
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.plot(monthly_series.index, monthly_series.values,
+                label='Actual Revenue', color='#2196F3', linewidth=2.5, marker='o', markersize=4)
+        ax.plot(ma.index, ma.values,
+                label=f'{window}-Month Moving Avg', color='#FF9800', linewidth=2, linestyle='--')
+        ax.plot(forecast_s.index, forecast_s.values,
+                label='Forecast (Next 3 Months)', color='#F44336',
+                linewidth=2.5, linestyle='--', marker='D', markersize=9)
+        ax.axvspan(forecast_s.index[0], forecast_s.index[-1], alpha=0.1, color='red')
+        ax.set_ylabel("Revenue (BRL)")
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x/1e6:.1f}M'))
+        ax.legend(fontsize=10)
+        ax.grid(alpha=0.3)
+        ax.spines[['top', 'right']].set_visible(False)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
 
-fig3.update_layout(template="plotly_white", height=400)
+    st.markdown("### 📅 3-Month Forecast Values")
+    forecast_table = pd.DataFrame({
+        'Month'            : [d.strftime('%Y-%m') for d in future_dates],
+        'Forecasted Revenue': [f"BRL {last_avg:,.2f}"] * 3,
+        'Method'           : [f'{window}-Month Moving Average'] * 3
+    })
+    st.dataframe(forecast_table, use_container_width=True)
 
-st.plotly_chart(fig3, use_container_width=True)
+    st.info("💡 **Interview note:** Moving Average is a baseline method. For production, use **Facebook Prophet** or **ARIMA** for seasonality-aware forecasting with confidence intervals.")
 
-st.divider()
+# ─────────────────────────────────────────────
+#  PAGE: CUSTOMERS
+# ─────────────────────────────────────────────
+elif page == "👥 Customers":
+    st.markdown("# 👥 Customer Segmentation")
+    st.markdown("---")
 
-# ==========================================
-# FORECAST
-# ==========================================
-st.subheader("📊 Revenue Forecast (3-Month Moving Avg)")
+    col1, col2, col3 = st.columns(3)
+    repeat_count   = repeat_df[repeat_df['Type'] == 'Repeat']['Count'].values[0]
+    onetime_count  = repeat_df[repeat_df['Type'] == 'One-Time']['Count'].values[0]
+    total_cust     = repeat_count + onetime_count
 
-forecast = monthly_series.rolling(3).mean().reset_index()
+    with col1:
+        st.metric("Total Unique Customers", f"{total_cust:,}")
+    with col2:
+        st.metric("Repeat Customers", f"{repeat_count:,}",
+                  delta=f"{repeat_count/total_cust*100:.1f}% of total")
+    with col3:
+        st.metric("One-Time Customers", f"{onetime_count:,}",
+                  delta=f"{onetime_count/total_cust*100:.1f}% of total")
 
-fig4 = px.line(filtered_monthly, x="month", y="revenue")
-fig4.add_scatter(
-    x=forecast['month'],
-    y=forecast['revenue'],
-    mode='lines',
-    name="Forecast",
-    line=dict(dash='dash', color='#e4572e')
-)
+    st.markdown("---")
 
-fig4.update_layout(template="plotly_white", height=400)
+    col_left, col_right = st.columns(2)
 
-st.plotly_chart(fig4, use_container_width=True)
+    with col_left:
+        st.markdown("#### Count — Repeat vs One-Time")
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.pie(
+            repeat_df['Count'],
+            labels=repeat_df['Type'],
+            autopct='%1.1f%%',
+            colors=['#2196F3', '#FF9800'],
+            startangle=90,
+            wedgeprops={'edgecolor': 'white', 'linewidth': 3},
+            textprops={'fontsize': 13}
+        )
+        ax.set_title("Customer Count Distribution", fontsize=13, fontweight='bold')
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
 
-if len(forecast.dropna()) > 0:
-    st.success(f"📌 Estimated Next Month Revenue: ${forecast['revenue'].iloc[-1]:,.0f}")
+    with col_right:
+        st.markdown("#### Revenue Distribution by Customer Type")
+        # Compute revenue share
+        total_rev = customer_revenue['revenue'].sum()
+        top_customers = customer_revenue.head(int(len(customer_revenue) * 0.2))
+        top_rev_pct = top_customers['revenue'].sum() / total_rev * 100
 
-st.divider()
+        fig2, ax2 = plt.subplots(figsize=(6, 6))
+        ax2.barh(['One-Time', 'Repeat'],
+                 [onetime_count / total_cust * 100, repeat_count / total_cust * 100],
+                 color=['#FF9800', '#2196F3'])
+        ax2.set_xlabel("% of Customers")
+        ax2.set_title("Customer Breakdown (%)", fontsize=13, fontweight='bold')
+        ax2.spines[['top', 'right']].set_visible(False)
+        ax2.grid(axis='x', alpha=0.3)
+        for i, v in enumerate([onetime_count / total_cust * 100, repeat_count / total_cust * 100]):
+            ax2.text(v + 0.3, i, f"{v:.1f}%", va='center', fontsize=12, fontweight='bold')
+        plt.tight_layout()
+        st.pyplot(fig2)
+        plt.close()
 
-# ==========================================
-# EXECUTIVE SUMMARY
-# ==========================================
-st.subheader("📌 Executive Summary")
+    st.markdown("---")
+    st.markdown("### 📋 Customer Revenue Table (Top 50)")
+    top50 = customer_revenue.head(50).copy()
+    top50.index = range(1, len(top50) + 1)
+    top50['revenue'] = top50['revenue'].map('BRL {:,.2f}'.format)
+    top50.columns = ['Customer Unique ID', 'Total Revenue']
+    st.dataframe(top50, use_container_width=True, height=350)
 
-st.markdown(f"""
-• Total revenue generated: **${total_revenue:,.0f}**  
-• Average order value: **${avg_order_value:,.2f}**  
-• Revenue growth trend: **{growth_rate:.2f}% per month**  
-• High revenue concentration in top customers  
-• Retention opportunity due to large one-time buyer segment  
+    st.info(f"💡 **Insight:** Top 20% of customers account for **{top_rev_pct:.1f}%** of total revenue. This is close to the Pareto principle (80/20 rule).")
 
-This dashboard supports strategic planning, financial forecasting and growth optimization.
-""")
+# ─────────────────────────────────────────────
+#  PAGE: CATEGORIES
+# ─────────────────────────────────────────────
+elif page == "💰 Categories":
+    st.markdown("# 💰 Product Category Revenue")
+    st.markdown("---")
+
+    n_cats = st.slider("Show Top N Categories", min_value=5, max_value=min(20, len(category_rev)), value=10)
+    top_n  = category_rev.head(n_cats)
+
+    fig, ax = plt.subplots(figsize=(12, n_cats * 0.6 + 1))
+    colors = plt.cm.Blues(np.linspace(0.4, 0.9, n_cats))
+    bars = ax.barh(top_n['category'][::-1], top_n['revenue'][::-1],
+                   color=colors, edgecolor='white')
+
+    ax.set_xlabel("Total Revenue (BRL)", fontsize=11)
+    ax.set_title(f"Top {n_cats} Product Categories by Revenue", fontsize=14, fontweight='bold')
+    ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'BRL {x/1e6:.1f}M'))
+    ax.spines[['top', 'right', 'left']].set_visible(False)
+    ax.grid(axis='x', alpha=0.3)
+
+    for bar, (_, row) in zip(bars, top_n[::-1].iterrows()):
+        ax.text(bar.get_width() * 0.02, bar.get_y() + bar.get_height() / 2,
+                f" BRL {row['revenue']:,.0f}",
+                va='center', color='white', fontsize=9, fontweight='bold')
+
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close()
+
+    st.markdown("### 📋 Category Revenue Table")
+    cat_display = category_rev.head(n_cats).copy()
+    cat_display.index = range(1, len(cat_display) + 1)
+    cat_display['revenue'] = cat_display['revenue'].map('BRL {:,.2f}'.format)
+    cat_display.columns = ['Category', 'Total Revenue']
+    st.dataframe(cat_display, use_container_width=True)
