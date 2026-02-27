@@ -4,7 +4,7 @@ This project performs end-to-end financial analytics on real-world Brazilian e-c
 
 A financial analytics dashboard built on real Brazilian e-commerce data (100K+ orders).
 
-🔗 **Live Demo:** [Click to view dashboard](https://your-streamlit-url.streamlit.app)
+🔗 **Live Demo:** [Click to view dashboard](https://financial-revenue-intelligence-olist-fgf7gnmscdytcha57hgkle.streamlit.app/)
 
 ---
 
@@ -74,4 +74,4 @@ streamlit run app.py
 
 1. After your app deploys on Streamlit, **copy the live URL** and replace this line:
 ```
-🔗 **Live Demo:** [Click to view dashboard](https://your-streamlit-url.streamlit.app)
+🔗 **Live Demo:** [Click to view dashboard](https://financial-revenue-intelligence-olist-fgf7gnmscdytcha57hgkle.streamlit.app/)
